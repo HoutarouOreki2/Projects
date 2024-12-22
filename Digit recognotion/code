@@ -1,0 +1,41 @@
+# Digit Recognition (Mar 2023 - Apr 2023)
+# Developed an artificial neural network classifier for recognizing handwritten digits, trained and tested using the MNIST dataset.
+# Achieved 98% accuracy.
+
+## Digit Recognition Project
+
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Flatten
+from tensorflow.keras.utils import to_categorical
+import numpy as np
+
+# Load the MNIST dataset
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+
+# Preprocess data
+x_train = x_train / 255.0
+x_test = x_test / 255.0
+y_train = to_categorical(y_train, 10)
+y_test = to_categorical(y_test, 10)
+
+# Build the model
+model = Sequential([
+    Flatten(input_shape=(28, 28)),
+    Dense(128, activation='relu'),
+    Dense(64, activation='relu'),
+    Dense(10, activation='softmax')
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(x_train, y_train, epochs=10, validation_data=(x_test, y_test))
+
+# Save the model
+model.save("digit_recognition_model.h5")
+
+# Generate answer matrix
+answer_matrix = np.argmax(model.predict(x_test), axis=1)
+np.save("digit_recognition_answers.npy", answer_matrix)
