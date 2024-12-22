@@ -1,9 +1,3 @@
-# Digit Recognition (Mar 2023 - Apr 2023)
-# Developed an artificial neural network classifier for recognizing handwritten digits, trained and tested using the MNIST dataset.
-# Achieved 98% accuracy.
-
-## Digit Recognition Project
-
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Flatten
