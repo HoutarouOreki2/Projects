@@ -1,0 +1,38 @@
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from sklearn.metrics import precision_score, recall_score
+import pandas as pd
+import numpy as np
+
+# Load the dataset
+data = pd.read_csv("spam.csv", encoding='latin-1')
+data = data[['v1', 'v2']]
+data.columns = ['label', 'text']
+data['label'] = data['label'].map({'ham': 0, 'spam': 1})
+
+# Preprocess the data
+vectorizer = CountVectorizer()
+X = vectorizer.fit_transform(data['text'])
+y = data['label']
+
+# Split the dataset
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train the SVM model
+model = SVC(kernel='linear', probability=True)
+model.fit(X_train, y_train)
+
+# Evaluate the model
+y_pred = model.predict(X_test)
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall:", recall_score(y_test, y_pred))
+
+# Save the model
+import pickle
+with open("spam_detection_model.pkl", "wb") as f:
+    pickle.dump(model, f)
+
+# Generate answer matrix
+answer_matrix = np.column_stack((y_test.to_numpy(), y_pred))
+np.save("spam_detection_answers.npy", answer_matrix)
