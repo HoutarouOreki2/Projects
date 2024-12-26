@@ -17,6 +17,7 @@ class PasswordManager:
     def __init__(self):
         self.user_id = None
         self.master_key = None
+        self.salt = None
         self.db_name = "password_manager.db"
         self.root = None
         self.password_frame = None
@@ -28,7 +29,8 @@ class PasswordManager:
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
-                master_password TEXT NOT NULL
+                master_password TEXT NOT NULL,
+                salt TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS passwords (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,10 +44,11 @@ class PasswordManager:
         conn.commit()
         conn.close()
 
-    def derive_key(self, master_password):
-        salt = b"static_salt"  # In production, use a unique salt per user
+    def derive_key(self, master_password, salt=None):
+        if salt is None:
+            salt = os.urandom(32)  # Generate a new 32-byte salt
         kdf = hashlib.pbkdf2_hmac('sha256', master_password.encode(), salt, 100000)
-        return kdf
+        return kdf, salt
 
     def encrypt_password(self, plaintext):
         backend = default_backend()
@@ -83,12 +86,12 @@ class PasswordManager:
             Messagebox.show_error("Master password is required!", "Error")
             return
 
-        key = self.derive_key(master_password)
+        key, salt = self.derive_key(master_password)
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
         try:
-            c.execute("INSERT INTO users (username, master_password) VALUES (?, ?)",
-                      (username, base64.b64encode(key).decode()))
+            c.execute("INSERT INTO users (username, master_password, salt) VALUES (?, ?, ?)",
+                      (username, base64.b64encode(key).decode(), base64.b64encode(salt).decode()))
             conn.commit()
             Messagebox.show_info("Account created! You can now log in.", "Success")
         except sqlite3.IntegrityError:
@@ -107,17 +110,25 @@ class PasswordManager:
             Messagebox.show_error("Master password is required!", "Error")
             return
 
-        self.master_key = self.derive_key(master_password)
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute("SELECT id, master_password FROM users WHERE username = ?", (username,))
+        c.execute("SELECT id, master_password, salt FROM users WHERE username = ?", (username,))
         user = c.fetchone()
         conn.close()
 
-        if user and base64.b64decode(user[1]) == self.master_key:
-            self.user_id = user[0]
-            Messagebox.show_info("Logged in successfully!", "Success")
-            self.main_interface()
+        if user:
+            stored_key = base64.b64decode(user[1])
+            salt = base64.b64decode(user[2])
+            key, _ = self.derive_key(master_password, salt)
+
+            if key == stored_key:
+                self.user_id = user[0]
+                self.master_key = key
+                self.salt = salt
+                Messagebox.show_info("Logged in successfully!", "Success")
+                self.main_interface()
+            else:
+                Messagebox.show_error("Invalid username or password.", "Error")
         else:
             Messagebox.show_error("Invalid username or password.", "Error")
 
@@ -159,7 +170,7 @@ class PasswordManager:
     def show_add_password_dialog(self):
         dialog = ttk.Toplevel(self.root)
         dialog.title("Add New Password")
-        dialog.geometry("400x400")  # Increased height
+        dialog.geometry("400x400")
 
         frame = ttk.Frame(dialog, padding=20)
         frame.pack(fill="both", expand=True)
