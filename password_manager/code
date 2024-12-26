@@ -1,0 +1,306 @@
+import sqlite3
+import os
+import base64
+import hashlib
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+import secrets
+import string
+import ttkbootstrap as ttk
+from ttkbootstrap.dialogs import Messagebox, Querybox
+from ttkbootstrap.constants import *
+from tkinter import Frame, Button, Label, ttk as tk_ttk
+
+
+class PasswordManager:
+    def __init__(self):
+        self.user_id = None
+        self.master_key = None
+        self.db_name = "password_manager.db"
+        self.root = None
+        self.password_frame = None
+
+    def initialize_db(self):
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                master_password TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                website TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+    def derive_key(self, master_password):
+        salt = b"static_salt"  # In production, use a unique salt per user
+        kdf = hashlib.pbkdf2_hmac('sha256', master_password.encode(), salt, 100000)
+        return kdf
+
+    def encrypt_password(self, plaintext):
+        backend = default_backend()
+        iv = os.urandom(16)
+        cipher = Cipher(algorithms.AES(self.master_key), modes.CBC(iv), backend=backend)
+        encryptor = cipher.encryptor()
+        padder = padding.PKCS7(algorithms.AES.block_size).padder()
+        padded_data = padder.update(plaintext.encode()) + padder.finalize()
+        encrypted = encryptor.update(padded_data) + encryptor.finalize()
+        return base64.b64encode(iv + encrypted).decode()
+
+    def decrypt_password(self, ciphertext):
+        try:
+            backend = default_backend()
+            data = base64.b64decode(ciphertext)
+            iv = data[:16]
+            encrypted_data = data[16:]
+            cipher = Cipher(algorithms.AES(self.master_key), modes.CBC(iv), backend=backend)
+            decryptor = cipher.decryptor()
+            decrypted_padded = decryptor.update(encrypted_data) + decryptor.finalize()
+            unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+            return (unpadder.update(decrypted_padded) + unpadder.finalize()).decode()
+        except Exception as e:
+            Messagebox.show_error(f"Error decrypting password: {str(e)}", "Decryption Error")
+            return "**********"
+
+    def register_gui(self):
+        username = Querybox.get_string("Enter a username")
+        if not username or not username.strip():
+            Messagebox.show_error("Username is required!", "Error")
+            return
+
+        master_password = Querybox.get_string("Set your master password")
+        if not master_password or not master_password.strip():
+            Messagebox.show_error("Master password is required!", "Error")
+            return
+
+        key = self.derive_key(master_password)
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        try:
+            c.execute("INSERT INTO users (username, master_password) VALUES (?, ?)",
+                      (username, base64.b64encode(key).decode()))
+            conn.commit()
+            Messagebox.show_info("Account created! You can now log in.", "Success")
+        except sqlite3.IntegrityError:
+            Messagebox.show_error("Username already exists.", "Error")
+        finally:
+            conn.close()
+
+    def login_gui(self):
+        username = Querybox.get_string("Enter your username")
+        if not username or not username.strip():
+            Messagebox.show_error("Username is required!", "Error")
+            return
+
+        master_password = Querybox.get_string("Enter your master password")
+        if not master_password or not master_password.strip():
+            Messagebox.show_error("Master password is required!", "Error")
+            return
+
+        self.master_key = self.derive_key(master_password)
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        c.execute("SELECT id, master_password FROM users WHERE username = ?", (username,))
+        user = c.fetchone()
+        conn.close()
+
+        if user and base64.b64decode(user[1]) == self.master_key:
+            self.user_id = user[0]
+            Messagebox.show_info("Logged in successfully!", "Success")
+            self.main_interface()
+        else:
+            Messagebox.show_error("Invalid username or password.", "Error")
+
+    def generate_password(self, length=16):
+        alphabet = string.ascii_letters + string.digits + string.punctuation
+        return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+    def load_passwords(self):
+        for widget in self.password_frame.winfo_children():
+            widget.destroy()
+
+        # Create a treeview to display passwords
+        columns = ('Website', 'Username', 'Password')
+        tree = tk_ttk.Treeview(self.password_frame, columns=columns, show='headings')
+
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=150)
+
+        # Add scrollbar
+        scrollbar = tk_ttk.Scrollbar(self.password_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        # Pack the tree and scrollbar
+        tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        c.execute("SELECT website, username, password FROM passwords WHERE user_id = ? ORDER BY website",
+                  (self.user_id,))
+        for website, username, encrypted in c.fetchall():
+            password = self.decrypt_password(encrypted)
+            tree.insert('', 'end', values=(website, username, password))
+        conn.close()
+
+        self.tree = tree
+
+    def show_add_password_dialog(self):
+        dialog = ttk.Toplevel(self.root)
+        dialog.title("Add New Password")
+        dialog.geometry("400x400")  # Increased height
+
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        # Website
+        ttk.Label(frame, text="Website:").pack(fill="x", pady=5)
+        website_entry = ttk.Entry(frame)
+        website_entry.pack(fill="x", pady=5)
+
+        # Username
+        ttk.Label(frame, text="Username:").pack(fill="x", pady=5)
+        username_entry = ttk.Entry(frame)
+        username_entry.pack(fill="x", pady=5)
+
+        # Password
+        ttk.Label(frame, text="Password:").pack(fill="x", pady=5)
+        password_frame = ttk.Frame(frame)
+        password_frame.pack(fill="x", pady=5)
+
+        password_entry = ttk.Entry(password_frame, show="*")
+        password_entry.pack(side="left", expand=True, fill="x")
+
+        def toggle_password_visibility():
+            current = password_entry.cget("show")
+            password_entry.configure(show="" if current == "*" else "*")
+
+        ttk.Button(password_frame, text="👁", width=3,
+                   command=toggle_password_visibility).pack(side="right", padx=5)
+
+        # Password Generator
+        gen_frame = ttk.Frame(frame)
+        gen_frame.pack(fill="x", pady=5)
+
+        ttk.Label(gen_frame, text="Length:").pack(side="left")
+        length_var = ttk.StringVar(value="16")
+        length_spin = ttk.Spinbox(gen_frame, from_=8, to=64, width=5, textvariable=length_var)
+        length_spin.pack(side="left", padx=5)
+
+        def generate_and_set():
+            password = self.generate_password(int(length_spin.get()))
+            password_entry.delete(0, 'end')
+            password_entry.insert(0, password)
+
+        ttk.Button(gen_frame, text="Generate",
+                   command=generate_and_set).pack(side="left", padx=5)
+
+        def save_password():
+            website = website_entry.get().strip()
+            username = username_entry.get().strip()
+            password = password_entry.get()
+
+            if not website or not username or not password:
+                Messagebox.show_error("All fields are required!", "Error")
+                return
+
+            encrypted_password = self.encrypt_password(password)
+            conn = sqlite3.connect(self.db_name)
+            c = conn.cursor()
+            try:
+                c.execute("INSERT INTO passwords (user_id, website, username, password) VALUES (?, ?, ?, ?)",
+                          (self.user_id, website, username, encrypted_password))
+                conn.commit()
+                self.load_passwords()
+                dialog.destroy()
+            except sqlite3.Error as e:
+                Messagebox.show_error(f"Error saving password: {str(e)}", "Database Error")
+            finally:
+                conn.close()
+
+        # Button frame at the bottom
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(side="bottom", fill="x", pady=20)
+
+        ttk.Button(button_frame, text="Save", command=save_password).pack(side="left", padx=10, expand=True)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side="right", padx=10, expand=True)
+
+    def remove_password(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            Messagebox.show_warning("Please select a password to remove.", "Warning")
+            return
+
+        if Messagebox.yesno("Are you sure you want to delete this password?", "Confirm Delete"):
+            website = self.tree.item(selected_item)['values'][0]
+            conn = sqlite3.connect(self.db_name)
+            c = conn.cursor()
+            try:
+                c.execute("DELETE FROM passwords WHERE user_id=? AND website=?", (self.user_id, website))
+                conn.commit()
+                self.load_passwords()
+            except sqlite3.Error as e:
+                Messagebox.show_error(f"Error removing password: {str(e)}", "Database Error")
+            finally:
+                conn.close()
+
+    def main_interface(self):
+        self.root.title("Password Manager")
+
+        # Clear existing widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        # Create main container
+        main_container = ttk.Frame(self.root, padding=10)
+        main_container.pack(fill='both', expand=True)
+
+        # Button frame
+        button_frame = ttk.Frame(main_container)
+        button_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Button(button_frame, text="Add Password",
+                   command=self.show_add_password_dialog).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Remove Password",
+                   command=self.remove_password).pack(side='left', padx=5)
+
+        # Password display frame
+        self.password_frame = ttk.Frame(main_container)
+        self.password_frame.pack(fill='both', expand=True)
+
+        self.load_passwords()
+
+    def main(self):
+        self.initialize_db()
+        self.root = ttk.Window(themename="solar")
+        self.root.title("Password Manager Login")
+        self.root.geometry("400x300")
+
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill="both", expand=True)
+
+        ttk.Label(main_frame, text="Password Manager",
+                  font=("Arial", 16, "bold")).pack(pady=10)
+
+        ttk.Button(main_frame, text="Register",
+                   command=self.register_gui).pack(pady=10)
+        ttk.Button(main_frame, text="Login",
+                   command=self.login_gui).pack(pady=10)
+
+        self.root.mainloop()
+
+
+if __name__ == "__main__":
+    pm = PasswordManager()
+    pm.main()
