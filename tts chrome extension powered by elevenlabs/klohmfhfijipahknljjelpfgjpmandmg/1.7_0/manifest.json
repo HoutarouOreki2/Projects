@@ -1,0 +1,42 @@
+{
+   "action": {
+      "default_icon": {
+         "128": "images/icon128.png",
+         "16": "images/icon16.png",
+         "48": "images/icon48.png"
+      },
+      "default_popup": "popup.html"
+   },
+   "background": {
+      "service_worker": "background.js"
+   },
+   "content_scripts": [ {
+      "css": [ "style.css" ],
+      "js": [ "content.js" ],
+      "matches": [ "<all_urls>" ],
+      "run_at": "document_end"
+   } ],
+   "description": "Listen to any text in the web in a human voice. A simple extension powered by ElevenLabs to convert any text to speech.",
+   "host_permissions": [ "<all_urls>" ],
+   "icons": {
+      "128": "images/icon128.png",
+      "16": "images/icon16.png",
+      "48": "images/icon48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAgyptLhbsveqdi87RFq8C2IjCKVAUcg5Rem4m7SHvaXJnNlxtD5VvBcctjbpoqQqjd1gk4Ayrex1dYMhEXrHIA0qhQdASVHD+GTBH95WsqmiWDZj/hcPAyVbz+FpMrCLubpJaXqZxkv0OZTH7/JmKCxYlcDzhQvQuhJ7xHNVtm2pvuGoe272woX5XpNMcaSwqAhgSXO/JR5jXyrswbdw0VD1h5fpRtR3Bx4vE1C+xFAVtU833cRiKmbHTslemmNUepdXwvvMgZFMne73wcp8XceStW50CdG7gmLPFEdQ7NInBGQfwttrzC0pHlmyFwhOUbaSNdCluNCJQdAB6mpAFzwIDAQAB",
+   "manifest_version": 3,
+   "name": "Human Reader, powered by ElevenLabs",
+   "permissions": [ "storage", "contextMenus" ],
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "1.7",
+   "web_accessible_resources": [ {
+      "matches": [ "<all_urls>" ],
+      "resources": [ 
+         "images/play.svg", 
+         "images/spinner.svg", 
+         "images/speak.svg", 
+         "images/stop.svg", 
+         "media/error-no-api-key.mp3" 
+      ]
+   } ]
+}
